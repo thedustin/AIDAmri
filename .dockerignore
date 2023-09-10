@@ -1,0 +1,8 @@
+# We need only specific files and directories, so we can ignore everything
+**
+
+# and allow only specific files and directories
+!bin/
+!lib/
+!fslinstaller_mod.py
+!requirements.txt

@@ -2,79 +2,92 @@ FROM ubuntu:18.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# ubuntu environment setup
-RUN apt-get update -y && apt-get upgrade -y &&\
-	apt-get install -y \
-	wget \
-	unzip \
-	build-essential checkinstall zlib1g-dev \
-	libssl-dev \
-	git \
-	dc \
-	ffmpeg \
-	libsm6 \
-	libxext6
+ENV VERSION_NIFTYREG=83d8d1182ed4c227ce4764f1fdab3b1797eecd8d \
+    VERSION_DSI_STUDIO=2022.08.03 \
+    VERSION_FSL=5.0.11 \
+    \
+    VIRTUAL_ENV=/opt/env \
+    PATH="$VIRTUAL_ENV/bin:$PATH" \
+    \
+    DIR_FSL=/usr/local/fsl \
+    PATH=${DIR_FSL}/bin:${PATH} \
+    FSLOUTPUTTYPE=NIFTI_GZ \
+    \
+    NIFTYREG_INSTALL=/aida/NiftyReg/niftyreg_source/niftyreg_install \
+    PATH=${PATH}:${NIFTYREG_INSTALL}/bin \
+    LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:${NIFTYREG_INSTALL}/lib
 
-RUN wget https://github.com/Kitware/CMake/releases/download/v3.23.2/cmake-3.23.2.tar.gz &&\
-	tar -xvzf cmake-3.23.2.tar.gz &&\
-	rm cmake-3.23.2.tar.gz &&\
-	cd cmake-3.23.2 &&\
-	./bootstrap &&\
-	make &&\
-	make install
+# ubuntu environment setup
+RUN apt-get update -y && apt-get install -y \
+        build-essential \
+        ca-certificates \
+        checkinstall \
+        dc \
+        ffmpeg \
+        gpg \
+        git \
+        libsm6 \
+        libssl-dev \
+        libxext6 \
+        python3 \
+        python3-pip \
+        python3-venv \
+        python3-wheel \
+        unzip \
+        wget \
+        zlib1g-dev \
+    \
+    && wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | gpg --dearmor - | tee /usr/share/keyrings/kitware-archive-keyring.gpg >/dev/null \
+    && echo 'deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ bionic main' | tee /etc/apt/sources.list.d/kitware.list >/dev/null \
+    && apt-get update -y && apt-get install -y \
+        cmake \
+    \
+    && apt -y autoremove && apt clean && apt autoclean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # create and switch to working directory
-RUN mkdir aida/
 WORKDIR /aida/
 
 # Python setup
-RUN apt install -y python3 python3-pip &&\
-	python3 -m pip install --user --upgrade pip &&\
-	apt-get install -y python3-venv
-ENV VIRTUAL_ENV=/opt/env
-RUN python3 -m venv $VIRTUAL_ENV
-ENV PATH="$VIRTUAL_ENV/bin:$PATH"
-RUN	python3 -m pip install --upgrade setuptools
+RUN python3 -m pip install --user --upgrade pip \
+    && python3 -m venv $VIRTUAL_ENV \
+    && python3 -m pip install --upgrade setuptools \
+    && python3 -m pip install wheel \
+    && python3 -m pip install --upgrade pip
+
 COPY requirements.txt requirements.txt
-RUN pip install --upgrade pip &&\
-	pip install -r requirements.txt
+
+RUN python3 -m pip install -r requirements.txt
 
 # installation of FSL 5.0.11 with modified installer 
 # (disabling interactive allocation query)
 COPY fslinstaller_mod.py ./
-RUN python3 fslinstaller_mod.py -V 5.0.11
 
-# Configure environment
-ENV FSLDIR=/usr/local/fsl
-RUN . ${FSLDIR}/etc/fslconf/fsl.sh
-ENV FSLOUTPUTTYPE=NIFTI_GZ
-ENV PATH=${FSLDIR}/bin:${PATH}
-RUN export FSLDIR PATHs
+RUN python3 fslinstaller_mod.py -V ${VERSION_FSL} \
+    && . ${DIR_FSL}/etc/fslconf/fsl.sh
 
 # Niftyreg preparation and installation
-RUN mkdir -p NiftyReg/niftyreg_source/
-WORKDIR /aida/NiftyReg
-RUN git clone git://git.code.sf.net/p/niftyreg/git niftyreg_source &&\
-cd niftyreg_source &&\
-git reset --hard 83d8d1182ed4c227ce4764f1fdab3b1797eecd8d &&\
- 	mkdir niftyreg_install niftyreg_build && cd .. &&\
- 	cmake niftyreg_source &&\
- 	cmake -D CMAKE_BUILD_TYPE=Release niftyreg_source &&\
- 	cmake -D CMAKE_INSTALL_PREFIX=niftyreg_source/niftyreg_build niftyreg_source &&\
- 	cmake -D CMAKE_C_COMPILER=/usr/bin/gcc-7 niftyreg_source &&\
- 	make && make install
-RUN export NIFTYRREG_INSTALL=../niftyreg_install
-ENV PATH=${PATH}:${NIFTYREG_INSTALL}/bin
-ENV LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:${NIFTYREG_INSTALL}/lib
-RUN export PATH && export LD_LIBRARY_PATH
+WORKDIR /aida/NiftyReg/
+
+RUN git clone https://github.com/KCL-BMEIS/niftyreg niftyreg_source  &&\
+    cd niftyreg_source &&\
+    git reset --hard ${VERSION_NIFTYREG} &&\
+     	mkdir niftyreg_install niftyreg_build && cd .. &&\
+     	cmake niftyreg_source &&\
+     	cmake -D CMAKE_BUILD_TYPE=Release niftyreg_source &&\
+     	cmake -D CMAKE_INSTALL_PREFIX=niftyreg_source/niftyreg_build niftyreg_source &&\
+     	cmake -D CMAKE_C_COMPILER=/usr/bin/gcc-7 niftyreg_source &&\
+     	make && make install
 
 WORKDIR /aida
+
 # download DSI studio
-RUN wget https://github.com/frankyeh/DSI-Studio/releases/download/2022.08.03/dsi_studio_ubuntu1804.zip &&\
-	unzip dsi_studio_ubuntu1804.zip -d dsi_studio_ubuntu1804 &&\
-	rm dsi_studio_ubuntu1804.zip
+RUN wget https://github.com/frankyeh/DSI-Studio/releases/download/${VERSION_DSI_STUDIO}/dsi_studio_ubuntu1804.zip \
+    && unzip dsi_studio_ubuntu1804.zip -d dsi_studio_ubuntu1804 \
+    && rm dsi_studio_ubuntu1804.zip
 
 # copy bin/ and lib/ from AIDAmri into image
 COPY bin/ bin/
 COPY lib/ lib/
+
 RUN echo "/aida/bin/dsi_studio_ubuntu_1804/dsi-studio/dsi_studio" > bin/3.2_DTIConnectivity/dsi_studioPath.txt
